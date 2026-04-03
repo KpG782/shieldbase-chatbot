@@ -1,0 +1,219 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #111111;
+  --color-ink-900: #1b1b1b;
+  --color-ink-800: #2c2c2c;
+  --color-sand-50: #fafaf8;
+  --color-sand-100: #f0efe9;
+  --color-sand-200: #e4e2d7;
+  --color-gold-300: #e6d2a7;
+  --color-gold-400: #d4bb84;
+  --color-gold-500: #a9853c;
+  --color-cyan-300: #b8d8d3;
+  --color-cyan-400: #88bcb4;
+  --color-cyan-500: #3f7e74;
+  --color-rose-300: #efb7ae;
+  --color-success-300: #95cbab;
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --shadow-panel: 0 20px 60px rgba(17, 24, 39, 0.08);
+}
+
+:root {
+  color-scheme: light;
+  --page-background:
+    radial-gradient(circle at top left, rgba(212, 187, 132, 0.18), transparent 24%),
+    radial-gradient(circle at top right, rgba(136, 188, 180, 0.14), transparent 26%),
+    linear-gradient(180deg, #fcfcfa 0%, #f6f5f0 52%, #f1efe8 100%);
+  --card-background: rgba(255, 255, 255, 0.7);
+  --card-strong: rgba(255, 255, 255, 0.9);
+  --line-soft: rgba(17, 24, 39, 0.08);
+  --line-strong: rgba(17, 24, 39, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--page-background);
+  color: #171717;
+  font-family: var(--font-body), sans-serif;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(212, 187, 132, 0.14), transparent 24%),
+    radial-gradient(circle at 88% 18%, rgba(136, 188, 180, 0.1), transparent 22%);
+  opacity: 0.9;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(212, 187, 132, 0.4);
+}
+
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
+}
+
+.ui-fade-in {
+  animation: ui-fade-in 0.5s ease-out both;
+}
+
+.ui-rise-in {
+  animation: ui-rise-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ui-slide-in-left {
+  animation: ui-slide-in-left 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ui-scale-in {
+  animation: ui-scale-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ui-soft-pulse {
+  animation: ui-soft-pulse 2.8s ease-in-out infinite;
+}
+
+.ui-spin-slow {
+  animation: ui-spin-slow 1s linear infinite;
+}
+
+.ui-sheen {
+  position: relative;
+  overflow: hidden;
+}
+
+.ui-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(255, 255, 255, 0.28) 45%, transparent 85%);
+  transform: translateX(-140%);
+  animation: ui-sheen 5.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.ui-hover-lift {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease;
+}
+
+.ui-hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ui-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ui-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ui-soft-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(163, 230, 53, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(163, 230, 53, 0.08);
+  }
+}
+
+@keyframes ui-spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ui-sheen {
+  0%,
+  100% {
+    transform: translateX(-140%);
+  }
+  45%,
+  60% {
+    transform: translateX(140%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}

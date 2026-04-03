@@ -1,0 +1,510 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[1]
+BACKEND_DIR = ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+import main
+from services.vectorstore import RetrievedChunk
+
+
+def _parse_sse_body(body: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for raw_event in body.strip().split("\n\n"):
+        if not raw_event.strip():
+            continue
+        event_name = "message"
+        data_lines: list[str] = []
+        for line in raw_event.splitlines():
+            if line.startswith("event:"):
+                event_name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.split(":", 1)[1].strip())
+        payload = "\n".join(data_lines)
+        events.append(
+            {
+                "event": event_name,
+                "data": json.loads(payload) if payload else None,
+            }
+        )
+    return events
+
+
+def _post_chat(client: TestClient, session_id: str, message: str) -> list[dict[str, Any]]:
+    response = client.post("/chat", json={"session_id": session_id, "message": message})
+    assert response.status_code == 200
+    return _parse_sse_body(response.text)
+
+
+@pytest.fixture()
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    import nodes.rag as rag
+    import nodes.router as router
+
+    main.SESSION_STORE.clear()
+
+    monkeypatch.setattr(router, "_classify_with_llm", lambda *args, **kwargs: None)
+    monkeypatch.setattr(rag, "_build_client_or_none", lambda: None)
+    monkeypatch.setattr(
+        rag,
+        "search_knowledge_base",
+        lambda *args, **kwargs: [
+            RetrievedChunk(
+                id="kb-1",
+                score=0.99,
+                source="02_auto_insurance.md",
+                title="Auto Insurance",
+                content=(
+                    "Comprehensive coverage typically includes non-collision losses such as "
+                    "theft, vandalism, fire, weather damage, and falling objects."
+                ),
+                metadata={"source": "02_auto_insurance.md", "title": "Auto Insurance"},
+            )
+        ],
+    )
+
+    with TestClient(main.app) as test_client:
+        yield test_client
+
+    main.SESSION_STORE.clear()
+
+
+def test_health_endpoint_returns_ok(client: TestClient) -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_reset_endpoint_reinitializes_session(client: TestClient) -> None:
+    response = client.post("/reset", json={"session_id": "reset-session"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "reset", "session_id": "reset-session"}
+    assert main.SESSION_STORE["reset-session"]["mode"] == "conversational"
+    assert main.SESSION_STORE["reset-session"]["quote_step"] == "identify"
+
+
+def test_chat_question_streams_sse_events(client: TestClient) -> None:
+    response = client.post(
+        "/chat",
+        json={"session_id": "question-session", "message": "What does comprehensive cover?"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    events = _parse_sse_body(response.text)
+
+    assert events[0]["event"] == "token"
+    assert events[-1]["event"] == "message_complete"
+    assert "comprehensive coverage" in events[-1]["data"]["message"].lower()
+    assert events[-1]["data"]["session"]["mode"] == "conversational"
+    assert events[-1]["data"]["session"]["quote_step"] == "identify"
+
+
+def test_rag_fallback_returns_clean_direct_answer_without_llm(client: TestClient) -> None:
+    events = _post_chat(client, "fallback-rag-session", "What does comprehensive coverage include?")
+
+    message = events[-1]["data"]["message"].lower()
+    assert "comprehensive coverage generally includes non-collision damage" in message
+    assert "based on the knowledge base" not in message
+
+
+def test_auto_quote_flow_returns_quote_result(client: TestClient) -> None:
+    session_id = "quote-session"
+    prompts = [
+        "I want a quote for auto insurance",
+        "2019",
+        "Toyota",
+        "Camry",
+        "35",
+        "0",
+        "standard",
+    ]
+
+    final_events: list[dict[str, Any]] = []
+    for message in prompts:
+        response = client.post("/chat", json={"session_id": session_id, "message": message})
+        assert response.status_code == 200
+        final_events = _parse_sse_body(response.text)
+
+    assert final_events[-1]["event"] == "message_complete"
+    payload = final_events[-1]["data"]
+    assert payload["quote_result"]["product_type"] == "auto"
+    assert payload["quote_result"]["coverage_level"] == "standard"
+    assert payload["quote_result"]["premium"] > 0
+    assert "estimated auto premium" in payload["message"].lower()
+    assert payload["session"]["mode"] == "transactional"
+    assert payload["session"]["quote_step"] == "confirm"
+    assert payload["session"]["has_quote_result"] is True
+
+
+def test_home_quote_flow_returns_quote_result(client: TestClient) -> None:
+    session_id = "home-quote-session"
+    prompts = [
+        "I want a quote for home insurance",
+        "house",
+        "Austin",
+        "350000",
+        "2005",
+        "comprehensive",
+    ]
+
+    final_events: list[dict[str, Any]] = []
+    for message in prompts:
+        final_events = _post_chat(client, session_id, message)
+
+    payload = final_events[-1]["data"]
+    assert payload["quote_result"]["product_type"] == "home"
+    assert payload["quote_result"]["coverage_level"] == "comprehensive"
+    assert payload["quote_result"]["premium"] > 0
+    assert payload["session"]["quote_step"] == "confirm"
+
+
+def test_life_quote_flow_returns_quote_result(client: TestClient) -> None:
+    session_id = "life-quote-session"
+    prompts = [
+        "I want a quote for life insurance",
+        "42",
+        "good",
+        "no",
+        "500000",
+        "20",
+        "standard",
+    ]
+
+    final_events: list[dict[str, Any]] = []
+    for message in prompts:
+        final_events = _post_chat(client, session_id, message)
+
+    payload = final_events[-1]["data"]
+    assert payload["quote_result"]["product_type"] == "life"
+    assert payload["quote_result"]["coverage_level"] == "standard"
+    assert payload["quote_result"]["premium"] > 0
+    assert payload["session"]["quote_step"] == "confirm"
+
+
+def test_mid_flow_question_preserves_quote_progress(client: TestClient) -> None:
+    session_id = "interrupt-session"
+
+    start_response = client.post(
+        "/chat",
+        json={"session_id": session_id, "message": "I want a quote for auto insurance"},
+    )
+    start_events = _parse_sse_body(start_response.text)
+    assert start_events[-1]["data"]["message"] == "What year is the vehicle? (e.g. 2019)"
+
+    question_response = client.post(
+        "/chat",
+        json={"session_id": session_id, "message": "What does comprehensive cover?"},
+    )
+    question_events = _parse_sse_body(question_response.text)
+    question_message = question_events[-1]["data"]["message"]
+
+    assert "comprehensive coverage" in question_message.lower()
+    assert "what year is the vehicle?" in question_message.lower()
+    assert main.SESSION_STORE[session_id]["current_field"] == "vehicle_year"
+    assert question_events[-1]["data"]["session"]["quote_step"] == "collect"
+
+    resume_response = client.post(
+        "/chat",
+        json={"session_id": session_id, "message": "2019"},
+    )
+    resume_events = _parse_sse_body(resume_response.text)
+
+    assert resume_events[-1]["data"]["message"] == "What is the vehicle make? (e.g. Toyota)"
+    assert main.SESSION_STORE[session_id]["collected_data"]["vehicle_year"] == 2019
+
+
+def test_invalid_numeric_input_reprompts_without_advancing(client: TestClient) -> None:
+    session_id = "invalid-numeric-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    events = _post_chat(client, session_id, "abc")
+
+    message = events[-1]["data"]["message"].lower()
+    assert "whole number" in message
+    assert "what year is the vehicle?" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "vehicle_year"
+    assert "vehicle_year" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_future_vehicle_year_is_rejected_immediately(client: TestClient) -> None:
+    session_id = "future-year-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    events = _post_chat(client, session_id, "2035")
+
+    message = events[-1]["data"]["message"]
+    assert "vehicle year must be between 1901" in message.lower()
+    assert main.SESSION_STORE[session_id]["quote_step"] == "collect"
+    assert main.SESSION_STORE[session_id]["current_field"] == "vehicle_year"
+    assert "vehicle_year" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_invalid_enum_input_reprompts_without_advancing(client: TestClient) -> None:
+    session_id = "invalid-enum-session"
+    prompts = [
+        "I want a quote for home insurance",
+        "house",
+        "Austin",
+        "350000",
+        "2005",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "premium-plus")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "please choose one of" in message
+    assert "basic, standard, or comprehensive" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "coverage_level"
+
+
+def test_negative_accident_count_is_rejected_before_quote_generation(client: TestClient) -> None:
+    session_id = "negative-accidents-session"
+    prompts = [
+        "I want a quote for auto insurance",
+        "2019",
+        "Toyota",
+        "Camry",
+        "35",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "-1")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "greater than or equal to 0" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "accidents_last_5yr"
+    assert "accidents_last_5yr" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_off_topic_text_for_string_field_is_rejected(client: TestClient) -> None:
+    session_id = "off-topic-session"
+
+    _post_chat(client, session_id, "I want a quote for home insurance")
+    _post_chat(client, session_id, "house")
+    events = _post_chat(client, session_id, "i like dogs")
+
+    message = events[-1]["data"]["message"].lower()
+    assert "city or location" in message or "real city or location" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "location"
+    assert "location" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_policy_question_in_string_field_is_rejected_without_advancing(client: TestClient) -> None:
+    session_id = "policy-question-string-session"
+
+    _post_chat(client, session_id, "I want a quote for home insurance")
+    _post_chat(client, session_id, "house")
+    events = _post_chat(client, session_id, "what insurance products do you offer")
+
+    message = events[-1]["data"]["message"].lower()
+    assert "requested detail" in message or "policy question" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "location"
+    assert "location" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_zero_property_value_is_rejected_immediately(client: TestClient) -> None:
+    session_id = "zero-property-value-session"
+    prompts = [
+        "I want a quote for home insurance",
+        "house",
+        "Austin",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "0")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "more realistic property value" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "estimated_value"
+    assert "estimated_value" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_low_property_value_is_rejected_immediately(client: TestClient) -> None:
+    session_id = "low-property-value-session"
+    prompts = [
+        "I want a quote for home insurance",
+        "house",
+        "Austin",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "100")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "more realistic property value" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "estimated_value"
+    assert "estimated_value" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_zoo_is_rejected_as_location(client: TestClient) -> None:
+    session_id = "zoo-location-session"
+
+    _post_chat(client, session_id, "I want a quote for home insurance")
+    _post_chat(client, session_id, "house")
+    events = _post_chat(client, session_id, "zoo")
+
+    message = events[-1]["data"]["message"].lower()
+    assert "real city or location" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "location"
+    assert "location" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_invalid_boolean_input_is_rejected_for_life_smoker_field(client: TestClient) -> None:
+    session_id = "invalid-bool-session"
+    prompts = [
+        "I want a quote for life insurance",
+        "42",
+        "good",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "sometimes")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "please reply yes or no" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "smoker"
+    assert "smoker" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_invalid_term_length_is_rejected_for_life_quote(client: TestClient) -> None:
+    session_id = "invalid-term-session"
+    prompts = [
+        "I want a quote for life insurance",
+        "42",
+        "good",
+        "no",
+        "500000",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "15")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "please choose one of: 10, 20, 30" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "term_years"
+    assert "term_years" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_quote_flow_starts_in_identify_mode_instead_of_rag(client: TestClient) -> None:
+    session_id = "start-quote-session"
+
+    events = _post_chat(client, session_id, "I want a quote")
+    payload = events[-1]["data"]
+
+    assert "which type of insurance quote would you like" in payload["message"].lower()
+    assert payload["session"]["mode"] == "transactional"
+    assert payload["session"]["quote_step"] == "identify"
+    assert payload["session"]["insurance_type"] is None
+
+
+def test_home_product_selection_advances_to_first_field(client: TestClient) -> None:
+    session_id = "home-product-selection-session"
+
+    _post_chat(client, session_id, "I want a quote")
+    events = _post_chat(client, session_id, "home")
+
+    payload = events[-1]["data"]
+    assert payload["message"] == "Is the property a house, condo, or apartment?"
+    assert payload["session"]["mode"] == "transactional"
+    assert payload["session"]["quote_step"] == "collect"
+    assert payload["session"]["insurance_type"] == "home"
+
+
+def test_invalid_year_built_does_not_advance_to_coverage_level(client: TestClient) -> None:
+    session_id = "invalid-year-built-session"
+    prompts = [
+        "I want a quote for home insurance",
+        "house",
+        "Makati",
+        "350000",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "100")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "year built must be between 1801" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "year_built"
+    assert main.SESSION_STORE[session_id]["quote_step"] == "collect"
+    assert "year_built" not in main.SESSION_STORE[session_id]["collected_data"]
+
+
+def test_adjust_reopens_collection_from_first_field(client: TestClient) -> None:
+    session_id = "adjust-session"
+    prompts = [
+        "I want a quote for auto insurance",
+        "2019",
+        "Toyota",
+        "Camry",
+        "35",
+        "0",
+        "standard",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "adjust")
+    message = events[-1]["data"]["message"]
+
+    assert message == "What year is the vehicle? (e.g. 2019)"
+    assert main.SESSION_STORE[session_id]["quote_result"] is None
+    assert main.SESSION_STORE[session_id]["current_field"] == "vehicle_year"
+    assert main.SESSION_STORE[session_id]["collected_data"] == {}
+
+
+def test_restart_during_confirm_resets_product_selection(client: TestClient) -> None:
+    session_id = "restart-confirm-session"
+    prompts = [
+        "I want a quote for auto insurance",
+        "2019",
+        "Toyota",
+        "Camry",
+        "35",
+        "0",
+        "standard",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "restart")
+    payload = events[-1]["data"]
+
+    assert "which insurance type would you like" in payload["message"].lower()
+    assert payload["session"]["quote_step"] == "identify"
+    assert payload["session"]["insurance_type"] is None
+    assert payload["session"]["has_quote_result"] is False
+
+
+def test_switching_product_mid_flow_resets_to_new_product(client: TestClient) -> None:
+    session_id = "switch-product-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    _post_chat(client, session_id, "2019")
+    events = _post_chat(client, session_id, "I want a quote for home insurance")
+
+    assert events[-1]["data"]["message"] == "Is the property a house, condo, or apartment?"
+    state = main.SESSION_STORE[session_id]
+    assert state["insurance_type"] == "home"
+    assert state["current_field"] == "property_type"
+    assert state["collected_data"] == {}
