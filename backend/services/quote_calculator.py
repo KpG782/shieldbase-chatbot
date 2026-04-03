@@ -59,6 +59,12 @@ def _validate_auto(data: dict[str, Any]) -> ValidationResult:
     accidents = int(data["accidents_last_5yr"])
     if accidents < 0:
         return ValidationResult(False, "accidents_last_5yr", "Accident count cannot be negative.")
+    if accidents > 10:
+        return ValidationResult(
+            False,
+            "accidents_last_5yr",
+            "Please enter a realistic accident count between 0 and 10 for the last 5 years.",
+        )
 
     coverage = str(data["coverage_level"]).lower()
     if coverage not in {"basic", "standard", "comprehensive"}:

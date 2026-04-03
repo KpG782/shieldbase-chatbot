@@ -402,7 +402,7 @@ export function useChat() {
       readJsonStorage<unknown>(HISTORY_STORAGE_KEY, [])
     );
 
-    const nextHistory = hasMeaningfulConversation(messages)
+    const nextHistory = quoteResult && hasMeaningfulConversation(messages)
       ? [
           buildSavedSession(sessionId, messages, sessionSnapshot, quoteResult),
           ...existingHistory.filter((entry) => entry.sessionId !== sessionId)

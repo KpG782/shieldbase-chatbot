@@ -1,6 +1,6 @@
 chromadb>=0.5.11
 fastapi>=0.115.0
-langgraph>=0.2.35
+langgraph>=0.2.56
 pydantic>=2.9.2
 python-dotenv>=1.0.0
 sentence-transformers>=3.2.0

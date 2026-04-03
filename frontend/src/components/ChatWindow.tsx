@@ -8,7 +8,6 @@ import { TypingIndicator } from "./TypingIndicator";
 const QUICK_PROMPTS = [
   "What does comprehensive coverage include?",
   "I want a quote for auto insurance",
-  "How do I file a claim?",
   "I want a home insurance quote"
 ];
 

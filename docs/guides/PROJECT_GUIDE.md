@@ -2,29 +2,21 @@
 
 ## Purpose
 
-This guide explains what the ShieldBase chatbot project is, how it is intended to work, what technology choices were planned, and what is currently missing from the repository.
+This guide explains what the ShieldBase chatbot project is, how it works now, and which technology choices shape the current implementation.
 
 It is meant to help a junior engineer quickly understand the project without reading every root-level markdown file first.
 
 ## Current Repository Status
 
-The repository currently contains **design and planning documents**, not the full application source code.
+The repository now contains the working application source code as well as the supporting design and audit docs.
 
 Present now:
-- `README.md`
-- `docs/specs/DESIGN.md`
-- `docs/specs/CLAUDE.md`
-- `docs/specs/MASTER.md`
+- `backend/` FastAPI + LangGraph backend
+- `frontend/` Next.js frontend
+- `tests/` backend integration tests
+- `docs/` specs, guides, audits, and reports
+- `docker-compose.backend.yml` and backend container files
 - `env.example`
-
-Missing right now:
-- `backend/`
-- `frontend/`
-- `widget/`
-- `docker-compose.yml`
-- actual FastAPI, React, LangGraph, and ChromaDB implementation files
-
-That means this repo should currently be treated as a **project specification** or **implementation blueprint**.
 
 ## Product Goal
 
@@ -42,7 +34,7 @@ The system is designed to handle both kinds of requests in one conversation.
 
 ## Core Architecture
 
-The planned architecture is a **LangGraph state machine** with two main modes:
+The current architecture is a **LangGraph state machine** with two main modes:
 
 - `conversational`
   Handles product questions using RAG.
@@ -88,9 +80,9 @@ The system is designed to classify each user message into one of three intents:
 
 The `response` intent is especially important. Without it, the system might mistake a field value like `"2019 Toyota Camry"` for a new conversation request instead of quote data.
 
-## Planned Graph Nodes
+## Graph Nodes
 
-The implementation documents describe the following nodes:
+The current backend uses these nodes:
 
 - `router`
   Classifies intent and routes to the correct branch.
@@ -110,9 +102,9 @@ The implementation documents describe the following nodes:
 - `confirm`
   Lets the user accept, adjust, or restart.
 
-## Planned State Shape
+## State Shape
 
-The intended conversation state includes fields such as:
+The conversation state includes fields such as:
 
 - `messages`
 - `mode`
@@ -143,15 +135,15 @@ Benefits:
 - easier content updates
 - lower hallucination risk
 
-## Planned Tech Stack
+## Current Tech Stack
 
 - Backend: Python, FastAPI, LangGraph
 - LLM access: OpenRouter
 - Embeddings: `sentence-transformers`
 - Vector store: ChromaDB
-- Frontend: React, Vite, TypeScript, Tailwind CSS
+- Frontend: Next.js, React, TypeScript, Tailwind CSS
 - Streaming: SSE
-- Local orchestration: Docker Compose
+- Local orchestration: backend-focused Docker Compose
 
 ## Quote Flow Design
 
@@ -189,7 +181,7 @@ Life insurance:
 - term years
 - coverage level
 
-## Planned Quote Calculation
+## Quote Calculation
 
 The project docs intentionally describe a simple premium calculator using:
 
@@ -230,12 +222,12 @@ Difference:
 
 ## Security Note
 
-The current `env.example` file contains what appears to be a real OpenRouter API key. That is not appropriate for an example file committed to a repository.
+`env.example` is currently sanitized and uses placeholders only, which is the correct setup.
 
-Recommended action:
-1. rotate the exposed key
-2. replace it with an empty placeholder
-3. keep real secrets only in a local `.env` file that is ignored by git
+Recommended practice:
+1. keep real secrets only in a local `.env` file
+2. never commit live API keys into `env.example`
+3. rotate any key immediately if it is ever exposed
 
 ## Strengths Of The Design
 
@@ -247,15 +239,12 @@ Recommended action:
 
 ## Current Gaps
 
-The following implementation work still appears to be outstanding:
+The main remaining gaps are no longer core implementation gaps. They are mostly follow-up hardening items:
 
-- build backend folder and services
-- implement LangGraph graph and nodes
-- create knowledge base ingestion
-- build the React frontend
-- implement session persistence strategy
-- add tests for key conversation flows
-- add actual deployment/dev runtime files
+- durable shared session persistence for multi-instance deployment
+- broader browser/E2E automation
+- deeper evaluation coverage for intent and RAG quality
+- stronger production-oriented rate limiting and abuse controls
 
 ## Recommended Next Steps
 

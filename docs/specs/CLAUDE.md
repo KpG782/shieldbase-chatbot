@@ -13,7 +13,7 @@ The orchestrator is a **LangGraph state machine** that routes between these mode
 
 - **Backend:** Python 3.11+, FastAPI, LangGraph, ChromaDB, sentence-transformers
 - **LLM:** OpenRouter API (model specified via env var)
-- **Frontend:** React + Vite + TypeScript + Tailwind CSS
+- **Frontend:** Next.js App Router + React + TypeScript + Tailwind CSS
 - **Streaming:** Server-Sent Events (SSE) from FastAPI to frontend
 
 ## Key Architecture Concepts
@@ -58,9 +58,12 @@ backend/
     llm.py             — OpenRouter client wrapper
     vectorstore.py     — ChromaDB init, ingestion, retrieval
     quote_calculator.py — Premium calculation (base rates × risk factors)
-  knowledge_base/      — 7 markdown files about ShieldBase Insurance
+  knowledge_base/      — markdown knowledge-base files about ShieldBase Insurance
 
 frontend/
+  app/
+    page.tsx           — Main page entry
+    api/               — Proxy routes to backend
   src/
     App.tsx            — Main app shell
     components/        — ChatWindow, MessageBubble, TypingIndicator, QuoteCard
@@ -86,8 +89,8 @@ uvicorn main:app --reload --port 8000
 # Frontend
 cd frontend && npm install && npm run dev
 
-# Docker
-docker-compose up --build
+# Backend container only
+docker compose -f docker-compose.backend.yml up --build
 ```
 
 ## API Endpoints

@@ -4,7 +4,7 @@
 
 ### States
 
-The chatbot operates in one of two **modes**, with the transactional mode having five **steps**:
+The chatbot operates in one of two **modes**, with the transactional mode having four **steps**:
 
 ```
 Modes:
@@ -15,7 +15,6 @@ Transactional Steps:
   identify  — determining which insurance product (auto/home/life)
   collect   — gathering product-specific details
   validate  — checking inputs are reasonable
-  quote     — computing and presenting the premium
   confirm   — user accepts, adjusts, or restarts
 ```
 
@@ -97,7 +96,7 @@ State AFTER question:
 | vehicle_make | string | non-empty |
 | vehicle_model | string | non-empty |
 | driver_age | int | 16 ≤ age ≤ 120 |
-| accidents_last_5yr | int | ≥ 0 |
+| accidents_last_5yr | int | 0 ≤ count ≤ 10 |
 | coverage_level | enum | basic / standard / comprehensive |
 
 ### Home Insurance
@@ -135,7 +134,7 @@ The formulas are intentionally simple. This is a chatbot assessment, not actuari
 
 | Error | Handling |
 |-------|---------|
-| OpenRouter API failure | Retry 2x with exponential backoff, then apologize and suggest retry |
+| OpenRouter API failure | Return a controlled fallback answer or error without breaking session state |
 | Invalid user input | Re-ask for that specific field with explanation |
 | ChromaDB empty/missing | Return fallback "I don't have info on that" response |
 | Unclassifiable intent | Default to conversational mode (safer than assuming transactional) |
@@ -144,6 +143,6 @@ The formulas are intentionally simple. This is a chatbot assessment, not actuari
 ## Latency Optimizations
 
 1. **SSE streaming** — tokens render as they generate
-2. **Parallel intent + retrieval** — fire both, discard retrieval if intent is transactional
+2. **Startup ingestion** — build or load the vector index at backend startup to avoid empty first-query retrieval
 3. **Embedding cache** — knowledge base embedded once at startup, persisted to disk
 4. **Small classifier prompt** — intent detection uses ~100 tokens, fast turnaround

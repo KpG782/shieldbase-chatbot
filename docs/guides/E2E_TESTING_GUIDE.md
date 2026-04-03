@@ -17,7 +17,7 @@ The backend now loads `.env` automatically from either:
 - `backend/.env`
 - repo root `.env`
 
-The frontend already supports Vite env files such as:
+The frontend supports Next.js env files such as:
 
 - `frontend/.env`
 - `frontend/.env.local`
@@ -36,10 +36,10 @@ CHROMA_PERSIST_DIR=./backend/vectorstore
 Frontend:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+BACKEND_API_BASE_URL=http://localhost:8000
 ```
 
-If `VITE_API_BASE_URL` is not set, Vite proxying still supports local development against `http://localhost:8000`.
+If `BACKEND_API_BASE_URL` is not set, the Next.js proxy defaults to `http://127.0.0.1:8000`.
 
 ## Verified Checks
 
@@ -59,7 +59,7 @@ These checks were verified locally:
 
 - Real browser-driven UI automation was not run.
 - Live OpenRouter responses depend on a valid outbound network path and working API key.
-- The current Python test file under `tests/` is only a scaffold, not a full app integration suite.
+- The backend test suite covers integration behavior, but browser-driven UI automation is still limited.
 
 ## How To Run Locally
 
@@ -92,7 +92,7 @@ npm run dev
 Open:
 
 ```text
-http://localhost:5173
+http://localhost:3000
 ```
 
 ## End-to-End Manual Test Script

@@ -5,9 +5,19 @@ from nodes.router import interpret_confirmation
 
 def confirm(state: dict, message: str) -> dict:
     action = interpret_confirmation(message)
+    quote_result = state.get("quote_result")
+
+    if action == "accept" and not quote_result:
+        _append_assistant_message(
+            state,
+            "There is no quote ready to confirm yet. Please complete the quote details first.",
+        )
+        state["mode"] = "transactional"
+        state["quote_step"] = "collect" if state.get("insurance_type") else "identify"
+        return state
 
     if action == "accept":
-        quote_result = state.get("quote_result") or {}
+        quote_result = quote_result or {}
         summary = quote_result.get("summary", "your insurance quote")
         _append_assistant_message(
             state,

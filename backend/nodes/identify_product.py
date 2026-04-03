@@ -4,7 +4,7 @@ from typing import Any
 
 
 PRODUCT_LABELS = {
-    "auto": ("auto", "car", "vehicle", "driver"),
+    "auto": ("auto", "car", "vehicle", "driver", "motor"),
     "home": ("home", "house", "property", "condo", "apartment"),
     "life": ("life", "family", "term life"),
 }

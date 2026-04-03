@@ -2,34 +2,22 @@
 
 ## Summary
 
-This document is the execution-ready build spec for the ShieldBase Insurance Assistant. It complements the existing root docs and is the primary handoff document for implementation work driven by a main orchestrator and parallel subagents.
-
-The current repository is still documentation-only. This spec defines the target implementation and locks the key technical decisions so future contributors do not need to re-decide architecture, interfaces, or setup.
+This document is the execution-ready build spec for the ShieldBase Insurance Assistant. It complements the existing root docs and remains a reference for how the current implementation is expected to behave.
 
 ## Project Status
 
 ### Current state
 
-The repository currently contains planning material only:
-- `README.md`
-- `docs/specs/DESIGN.md`
-- `docs/specs/CLAUDE.md`
-- `docs/specs/MASTER.md`
-- `docs/guides/PROJECT_GUIDE.md`
-- `env.example`
-
-The following implementation assets do not currently exist and must be created:
-- `backend/`
-- `frontend/`
-- `widget/`
-- runnable API and UI code
-- vector ingestion code
-- tests
-- deployment/runtime files
+The repository now contains a working implementation:
+- `backend/` FastAPI + LangGraph application
+- `frontend/` Next.js App Router UI
+- `tests/` backend integration coverage
+- `docker-compose.backend.yml` and backend container files
+- knowledge-base content, ingestion, and local vector store support
 
 ### Role of this document
 
-This file is the execution source of truth for implementation. Existing docs remain useful as background context, but implementation should follow this spec when there is any ambiguity.
+This file is now a behavior and architecture reference. If there is any ambiguity, the live code in `backend/` and `frontend/` is the source of truth.
 
 ## Environment Setup
 
@@ -95,7 +83,7 @@ Build an AI-powered insurance assistant that can both:
 - **LLM access:** OpenRouter through a dedicated client wrapper
 - **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2`
 - **Vector store:** local persistent ChromaDB
-- **Frontend:** React + Vite + TypeScript + Tailwind CSS
+- **Frontend:** Next.js App Router + React + TypeScript + Tailwind CSS
 - **Streaming:** SSE over `POST /chat`
 - **Runtime:** local dev first, Docker-friendly structure second
 
@@ -203,7 +191,7 @@ The system must classify every user message into exactly one of:
 
 ### Failure handling
 
-- OpenRouter failure: retry with bounded backoff, then return a controlled apology/error response
+- OpenRouter failure: return a controlled fallback or error response without breaking the quote workflow
 - empty retrieval: answer conservatively and indicate missing knowledge
 - invalid user input: re-ask only the affected field
 - state corruption: reset the session and return a recovery message
@@ -459,7 +447,7 @@ All agents must honor:
 7. Submit invalid data and confirm only the bad field is re-requested.
 8. Restart after a quote and begin a new quote in the same session.
 9. Trigger retrieval with an empty store and verify graceful fallback.
-10. Simulate OpenRouter failure and verify controlled user-facing recovery.
+10. Simulate OpenRouter failure and verify controlled fallback or user-facing recovery.
 11. Confirm `POST /reset` clears only the targeted session.
 
 ## Risks And Defaults

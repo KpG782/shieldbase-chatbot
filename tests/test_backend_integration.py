@@ -287,7 +287,7 @@ def test_negative_accident_count_is_rejected_before_quote_generation(client: Tes
     events = _post_chat(client, session_id, "-1")
     message = events[-1]["data"]["message"].lower()
 
-    assert "greater than or equal to 0" in message
+    assert "realistic accident count between 0 and 10" in message
     assert main.SESSION_STORE[session_id]["current_field"] == "accidents_last_5yr"
     assert "accidents_last_5yr" not in main.SESSION_STORE[session_id]["collected_data"]
 
@@ -430,6 +430,39 @@ def test_home_product_selection_advances_to_first_field(client: TestClient) -> N
     assert payload["session"]["insurance_type"] == "home"
 
 
+def test_motor_alias_selects_auto_quote_product(client: TestClient) -> None:
+    session_id = "motor-product-selection-session"
+
+    _post_chat(client, session_id, "I want a quote")
+    events = _post_chat(client, session_id, "motor")
+
+    payload = events[-1]["data"]
+    assert payload["message"] == "What year is the vehicle? (e.g. 2019)"
+    assert payload["session"]["mode"] == "transactional"
+    assert payload["session"]["quote_step"] == "collect"
+    assert payload["session"]["insurance_type"] == "auto"
+
+
+def test_invalid_text_reply_during_numeric_auto_field_does_not_leave_quote_flow(client: TestClient) -> None:
+    session_id = "invalid-text-auto-field-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    first_retry = _post_chat(client, session_id, "motor")
+    second_retry = _post_chat(client, session_id, "yes continue")
+
+    first_message = first_retry[-1]["data"]["message"].lower()
+    second_message = second_retry[-1]["data"]["message"].lower()
+
+    assert "please enter a whole number" in first_message
+    assert "what year is the vehicle?" in first_message
+    assert "please enter a whole number" in second_message
+    assert "what year is the vehicle?" in second_message
+    assert main.SESSION_STORE[session_id]["quote_step"] == "collect"
+    assert main.SESSION_STORE[session_id]["current_field"] == "vehicle_year"
+    assert main.SESSION_STORE[session_id]["insurance_type"] == "auto"
+    assert main.SESSION_STORE[session_id]["collected_data"] == {}
+
+
 def test_invalid_year_built_does_not_advance_to_coverage_level(client: TestClient) -> None:
     session_id = "invalid-year-built-session"
     prompts = [
@@ -471,6 +504,26 @@ def test_adjust_reopens_collection_from_first_field(client: TestClient) -> None:
     assert main.SESSION_STORE[session_id]["quote_result"] is None
     assert main.SESSION_STORE[session_id]["current_field"] == "vehicle_year"
     assert main.SESSION_STORE[session_id]["collected_data"] == {}
+
+
+def test_implausible_accident_count_is_rejected_before_quote_generation(client: TestClient) -> None:
+    session_id = "implausible-accidents-session"
+    prompts = [
+        "I want a quote for auto insurance",
+        "2019",
+        "Toyota",
+        "Camry",
+        "29",
+    ]
+    for message in prompts:
+        _post_chat(client, session_id, message)
+
+    events = _post_chat(client, session_id, "24")
+    message = events[-1]["data"]["message"].lower()
+
+    assert "realistic accident count between 0 and 10" in message
+    assert main.SESSION_STORE[session_id]["current_field"] == "accidents_last_5yr"
+    assert "accidents_last_5yr" not in main.SESSION_STORE[session_id]["collected_data"]
 
 
 def test_restart_during_confirm_resets_product_selection(client: TestClient) -> None:

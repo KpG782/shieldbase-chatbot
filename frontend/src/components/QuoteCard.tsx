@@ -136,7 +136,7 @@ export function QuoteCard({
       ) : null}
       {filteredEntries.length > entries.length ? (
         <p className="mt-4 text-xs text-slate-500">
-          Showing the key quote details in chat. Open confirmation for the full review.
+          Showing the key quote details here to keep the chat focused.
         </p>
       ) : null}
     </section>

@@ -21,7 +21,7 @@ The core requirement is graceful switching between those two modes without losin
 
 | Component | Technology |
 |-----------|-----------|
-| Backend orchestration | Python + LangGraph-style state machine |
+| Backend orchestration | Python + LangGraph `StateGraph` |
 | API layer | FastAPI + SSE streaming |
 | LLM | OpenRouter |
 | Retrieval | ChromaDB + sentence-transformers |
@@ -41,7 +41,7 @@ User -> Next.js UI -> /api/chat proxy -> FastAPI /chat
                  v                                 v
               RAG path                    quote workflow path
       retrieve -> answer -> resume   identify -> collect -> validate
-                                                -> quote -> confirm
+                                                -> confirm
 ```
 
 For the fuller engineering diagrams, see:

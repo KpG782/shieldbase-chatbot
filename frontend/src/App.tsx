@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ChatWindow } from "./components/ChatWindow";
 import { QuoteCard } from "./components/QuoteCard";
@@ -81,10 +80,6 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const credentials = useMemo(() => getConfiguredCredentials(), []);
-  const confirmationReady =
-    chat.sessionSnapshot?.quote_step === "confirm" &&
-    chat.sessionSnapshot?.mode === "transactional" &&
-    !!chat.quoteResult;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -103,6 +98,11 @@ export default function App() {
 
     setDraft("");
     await chat.sendMessage(trimmed);
+  };
+
+  const startNewQuote = () => {
+    chat.createNewSession();
+    setDraft("I need a quote for auto insurance.");
   };
 
   const handleAutofillDemo = () => {
@@ -248,7 +248,7 @@ export default function App() {
         >
           <div className="flex h-full min-h-0 flex-col gap-3">
             <div
-              className={`ui-scale-in rounded-[1.75rem] border border-black/8 bg-white/70 p-3 shadow-[0_12px_32px_rgba(15,23,42,0.05)] ${
+              className={`ui-scale-in sticky top-0 z-10 rounded-[1.75rem] border border-black/8 bg-white/70 p-3 shadow-[0_12px_32px_rgba(15,23,42,0.05)] ${
                 sidebarOpen ? "" : "items-center"
               }`}
             >
@@ -290,20 +290,10 @@ export default function App() {
                   <button
                     type="button"
                     className="ui-hover-lift rounded-full bg-[#1f1f1f] px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-black"
-                    onClick={() => setDraft("I need a quote for auto insurance.")}
+                    onClick={startNewQuote}
                   >
                     New quote
                   </button>
-                  <Link
-                    href="/quote-confirmation"
-                    className={`ui-hover-lift rounded-full px-3.5 py-2 text-center text-sm font-semibold transition ${
-                      confirmationReady
-                        ? "bg-[#ece8dd] text-slate-900 hover:bg-[#e2dccb]"
-                        : "pointer-events-none bg-slate-200 text-slate-400"
-                    }`}
-                  >
-                    Review quote
-                  </Link>
                   <button
                     type="button"
                     className="ui-hover-lift rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
@@ -398,7 +388,7 @@ export default function App() {
                     icon="bolt"
                     label="New quote"
                     collapsed
-                    onClick={() => setDraft("I need a quote for auto insurance.")}
+                    onClick={startNewQuote}
                   />
                   <NavItem
                     icon="logout"
@@ -435,7 +425,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="rounded-[1.75rem] border border-black/8 bg-white/80 p-3">
+              <div className="sticky top-0 z-10 rounded-[1.75rem] border border-black/8 bg-white/80 p-3">
                 <div className="space-y-1">
                   <NavItem icon="chat_bubble" label="Conversation" collapsed={false} active />
                 </div>
@@ -444,22 +434,12 @@ export default function App() {
                     type="button"
                     className="ui-hover-lift rounded-full bg-[#1f1f1f] px-3.5 py-2 text-sm font-semibold text-white"
                     onClick={() => {
-                      setDraft("I need a quote for auto insurance.");
+                      startNewQuote();
                       setSidebarOpen(false);
                     }}
                   >
                     New quote
                   </button>
-                  <Link
-                    href="/quote-confirmation"
-                    className={`ui-hover-lift rounded-full px-3.5 py-2 text-center text-sm font-semibold transition ${
-                      confirmationReady
-                        ? "bg-[#ece8dd] text-slate-900"
-                        : "pointer-events-none bg-slate-200 text-slate-400"
-                    }`}
-                  >
-                    Review quote
-                  </Link>
                   <button
                     type="button"
                     className="ui-hover-lift rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700"

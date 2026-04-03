@@ -1,0 +1,26 @@
+services:
+  shieldbase-backend:
+    image: kpg782/shieldbase-backend:latest
+    container_name: shieldbase-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      CHROMA_PERSIST_DIR: /data/vectorstore
+      HF_HOME: /data/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /data/sentence-transformers
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-meta-llama/llama-3.1-8b-instruct}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - shieldbase_backend_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+volumes:
+  shieldbase_backend_data:

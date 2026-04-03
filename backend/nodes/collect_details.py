@@ -32,6 +32,7 @@ FIELD_SPECS: dict[str, list[dict[str, Any]]] = {
             "prompt": "How many accidents has the driver had in the last 5 years?",
             "type": "int",
             "min_value": 0,
+            "max_value": 10,
         },
         {
             "name": "coverage_level",
@@ -115,16 +116,19 @@ def collect_details(state: dict[str, Any], message: str | None = None) -> dict[s
 
     if current_field and message and message.strip():
         try:
+            if insurance_type == "auto":
+                collected = _merge_auto_multi_field_input(collected, current_field, message)
             field_spec = _get_field_spec(fields, current_field)
-            collected[current_field] = _coerce_value(
-                current_field,
-                field_spec.get("type", "str"),
-                message,
-                allowed=field_spec.get("allowed"),
-                min_value=field_spec.get("min_value"),
-                max_value=field_spec.get("max_value"),
-                min_length=field_spec.get("min_length"),
-            )
+            if current_field not in collected:
+                collected[current_field] = _coerce_value(
+                    current_field,
+                    field_spec.get("type", "str"),
+                    message,
+                    allowed=field_spec.get("allowed"),
+                    min_value=field_spec.get("min_value"),
+                    max_value=field_spec.get("max_value"),
+                    min_length=field_spec.get("min_length"),
+                )
             state["collected_data"] = collected
         except ValueError as exc:
             prompt = _field_prompt(fields, current_field)
@@ -150,6 +154,67 @@ def collect_details(state: dict[str, Any], message: str | None = None) -> dict[s
 def get_field_prompt(insurance_type: str, field_name: str) -> str:
     fields = FIELD_SPECS.get(insurance_type, [])
     return _field_prompt(fields, field_name)
+
+
+def _merge_auto_multi_field_input(
+    collected: dict[str, Any],
+    current_field: str,
+    raw: str,
+) -> dict[str, Any]:
+    next_collected = dict(collected)
+    lowered = raw.lower()
+    compact = re.sub(r"\s+", " ", raw).strip()
+
+    if current_field == "vehicle_year":
+        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", compact)
+        coverage_match = re.search(r"\b(basic|standard|comprehensive)\b", lowered)
+        if coverage_match:
+            next_collected.setdefault("coverage_level", coverage_match.group(1))
+
+        remainder = compact
+        if year_match:
+            remainder = re.sub(r"\b(19\d{2}|20\d{2})\b", "", remainder, count=1).strip()
+        remainder = re.sub(r"\bmodel\b", "", remainder, flags=re.IGNORECASE).strip()
+        if coverage_match:
+            remainder = re.sub(
+                r"\b(basic|standard|comprehensive)\b",
+                "",
+                remainder,
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip()
+
+        parts = [part for part in remainder.split() if part]
+        if parts:
+            next_collected.setdefault("vehicle_make", parts[0].title())
+        if len(parts) >= 2:
+            next_collected.setdefault("vehicle_model", " ".join(parts[1:]).title())
+
+    elif current_field == "vehicle_make":
+        cleaned = re.sub(r"\b(19\d{2}|20\d{2})\b", "", compact).strip()
+        cleaned = re.sub(r"\bmodel\b", "", cleaned, flags=re.IGNORECASE).strip()
+        parts = [part for part in cleaned.split() if part]
+        if parts:
+            next_collected.setdefault("vehicle_make", parts[0].title())
+        if len(parts) >= 2:
+            next_collected.setdefault("vehicle_model", " ".join(parts[1:]).title())
+
+    elif current_field == "vehicle_model":
+        cleaned = re.sub(r"\b(19\d{2}|20\d{2})\b", "", compact).strip()
+        cleaned = re.sub(r"\bmodel\b", "", cleaned, flags=re.IGNORECASE).strip()
+        if next_collected.get("vehicle_make"):
+            make_prefix = str(next_collected["vehicle_make"])
+            if cleaned.lower().startswith(make_prefix.lower()):
+                cleaned = cleaned[len(make_prefix):].strip()
+        if cleaned:
+            next_collected.setdefault("vehicle_model", cleaned.title())
+
+    elif current_field == "coverage_level":
+        coverage_match = re.search(r"\b(basic|standard|comprehensive)\b", lowered)
+        if coverage_match:
+            next_collected.setdefault("coverage_level", coverage_match.group(1))
+
+    return next_collected
 
 
 def _next_missing_field(fields: list[dict[str, Any]], collected: dict[str, Any]) -> str | None:
@@ -288,6 +353,11 @@ def _range_error_message(
         return (
             "Please enter a more realistic property value in USD, "
             "for example 100000 or 350000."
+        )
+    if field_name == "accidents_last_5yr" and min_value is not None and max_value is not None:
+        return (
+            "Please enter a realistic accident count between "
+            f"{int(min_value)} and {int(max_value)} for the last 5 years."
         )
     if field_name == "coverage_amount" and min_value is not None:
         return "Please enter a positive coverage amount."

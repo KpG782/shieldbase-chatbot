@@ -25,6 +25,15 @@ QUOTE_HINTS = {"quote", "price", "pricing", "premium", "buy", "purchase", "insur
 AFFIRM_HINTS = {"yes", "accept", "confirm", "looks good", "good", "approve", "ok", "okay"}
 ADJUST_HINTS = {"adjust", "change", "modify", "update", "edit"}
 RESTART_HINTS = {"restart", "start over", "reset"}
+PROGRESSION_HINTS = {
+    "next",
+    "what next",
+    "whats next",
+    "what's next",
+    "continue",
+    "go on",
+    "proceed",
+}
 
 
 def classify_intent(state: dict[str, Any], message: str, client: OpenRouterClient | None = None) -> str:
@@ -57,6 +66,8 @@ def _classify_deterministic(state: dict[str, Any], message: str) -> str | None:
     if mode == "transactional" and quote_step == "identify":
         if _PRODUCT_KEYWORDS & tokens:
             return "response"
+        if any(phrase in lowered for phrase in PROGRESSION_HINTS) or any(token in tokens for token in AFFIRM_HINTS):
+            return "response"
         # Not a product keyword — fall through to LLM/rules (may be a real question)
         return None
 
@@ -66,6 +77,14 @@ def _classify_deterministic(state: dict[str, Any], message: str) -> str | None:
         if "quote" in lowered:
             return "quote"
         if "?" not in lowered and not any(w in tokens for w in QUESTION_HINTS):
+            return "response"
+        if any(phrase in lowered for phrase in PROGRESSION_HINTS):
+            return "response"
+
+    # Once already in a quote flow, conversational-looking "continue" turns should remain
+    # in the transactional branch instead of resetting or drifting into generic chat.
+    if mode == "transactional" and quote_step in {"collect", "confirm"}:
+        if any(phrase in lowered for phrase in PROGRESSION_HINTS):
             return "response"
 
     return None
@@ -135,7 +154,18 @@ def _classify_with_llm(state: dict[str, Any], message: str, client: OpenRouterCl
     return None
 
 
-_PRODUCT_KEYWORDS = {"auto", "car", "vehicle", "home", "house", "property", "condo", "apartment", "life"}
+_PRODUCT_KEYWORDS = {
+    "auto",
+    "car",
+    "vehicle",
+    "motor",
+    "home",
+    "house",
+    "property",
+    "condo",
+    "apartment",
+    "life",
+}
 
 
 def _classify_with_rules(state: dict[str, Any], message: str) -> str:
@@ -156,6 +186,8 @@ def _classify_with_rules(state: dict[str, Any], message: str) -> str:
     if mode == "transactional" and quote_step == "identify":
         if _PRODUCT_KEYWORDS & tokens:
             return "response"
+        if any(phrase in lowered for phrase in PROGRESSION_HINTS) or any(token in tokens for token in AFFIRM_HINTS):
+            return "response"
         # A non-product message while waiting for type selection → question (RAG answers it)
         return "question"
 
@@ -163,6 +195,8 @@ def _classify_with_rules(state: dict[str, Any], message: str) -> str:
         return "response"
 
     if mode == "transactional" and current_field:
+        if any(phrase in lowered for phrase in PROGRESSION_HINTS):
+            return "response"
         if "?" in lowered and "quote" not in lowered:
             return "question"
         return "response"
