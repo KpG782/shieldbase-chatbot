@@ -50,6 +50,11 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     import nodes.rag as rag
     import nodes.router as router
 
+    # Disable rate limiting so the test suite does not hit per-IP limits.
+    # _is_rate_limit_disabled() reads this env var at request time, so
+    # monkeypatch.setenv is effective even though main.py is already imported.
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+
     main.SESSION_STORE.clear()
 
     monkeypatch.setattr(router, "_classify_with_llm", lambda *args, **kwargs: None)
@@ -224,6 +229,79 @@ def test_mid_flow_question_preserves_quote_progress(client: TestClient) -> None:
 
     assert resume_events[-1]["data"]["message"] == "What is the vehicle make? (e.g. Toyota)"
     assert main.SESSION_STORE[session_id]["collected_data"]["vehicle_year"] == 2019
+
+
+def test_live_llm_misclassification_does_not_break_numeric_quote_reply(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nodes.router as router
+
+    session_id = "llm-misclassification-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    monkeypatch.setattr(router, "_classify_with_llm", lambda *args, **kwargs: "question")
+
+    events = _post_chat(client, session_id, "2019")
+
+    assert events[-1]["data"]["message"] == "What is the vehicle make? (e.g. Toyota)"
+    assert main.SESSION_STORE[session_id]["collected_data"]["vehicle_year"] == 2019
+
+
+def test_live_llm_misclassification_does_not_break_quote_start(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nodes.router as router
+
+    monkeypatch.setattr(router, "_classify_with_llm", lambda *args, **kwargs: "question")
+
+    events = _post_chat(client, "llm-quote-start-session", "I want a quote for auto insurance")
+    payload = events[-1]["data"]
+
+    assert payload["message"] == "What year is the vehicle? (e.g. 2019)"
+    assert payload["session"]["mode"] == "transactional"
+    assert payload["session"]["quote_step"] == "collect"
+    assert payload["session"]["insurance_type"] == "auto"
+
+
+def test_comma_separated_auto_details_fill_multiple_fields(client: TestClient) -> None:
+    session_id = "comma-separated-auto-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    _post_chat(client, session_id, "2019")
+    events = _post_chat(client, session_id, "Toyota, Camry, 35, 0, standard")
+
+    payload = events[-1]["data"]
+    assert "estimated auto premium" in payload["message"].lower()
+    assert payload["quote_result"]["product_type"] == "auto"
+    assert payload["quote_result"]["coverage_level"] == "standard"
+
+    state = main.SESSION_STORE[session_id]
+    assert state["collected_data"]["vehicle_make"] == "Toyota"
+    assert state["collected_data"]["vehicle_model"] == "Camry"
+    assert state["collected_data"]["driver_age"] == 35
+    assert state["collected_data"]["accidents_last_5yr"] == 0
+
+
+def test_live_llm_misclassification_still_resumes_after_mid_quote_question(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nodes.router as router
+
+    session_id = "llm-mid-quote-question-session"
+
+    _post_chat(client, session_id, "I want a quote for auto insurance")
+    monkeypatch.setattr(router, "_classify_with_llm", lambda *args, **kwargs: "question")
+
+    events = _post_chat(client, session_id, "What does comprehensive coverage include?")
+    payload = events[-1]["data"]
+
+    assert "comprehensive coverage" in payload["message"].lower()
+    assert "what year is the vehicle?" in payload["message"].lower()
+    assert payload["session"]["mode"] == "transactional"
+    assert payload["session"]["quote_step"] == "collect"
 
 
 def test_invalid_numeric_input_reprompts_without_advancing(client: TestClient) -> None:

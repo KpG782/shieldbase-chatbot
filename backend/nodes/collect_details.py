@@ -164,6 +164,11 @@ def _merge_auto_multi_field_input(
     next_collected = dict(collected)
     lowered = raw.lower()
     compact = re.sub(r"\s+", " ", raw).strip()
+    fields = FIELD_SPECS["auto"]
+
+    parsed_sequential = _merge_auto_sequential_input(fields, next_collected, current_field, raw)
+    if parsed_sequential is not None:
+        next_collected = parsed_sequential
 
     if current_field == "vehicle_year":
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", compact)
@@ -213,6 +218,50 @@ def _merge_auto_multi_field_input(
         coverage_match = re.search(r"\b(basic|standard|comprehensive)\b", lowered)
         if coverage_match:
             next_collected.setdefault("coverage_level", coverage_match.group(1))
+
+    return next_collected
+
+
+def _merge_auto_sequential_input(
+    fields: list[dict[str, Any]],
+    collected: dict[str, Any],
+    current_field: str,
+    raw: str,
+) -> dict[str, Any] | None:
+    if "," not in raw:
+        return None
+
+    field_names = [str(field["name"]) for field in fields]
+    if current_field not in field_names:
+        return None
+
+    parts = [
+        re.sub(r"^[`'\"\s]+|[`'\"\s]+$", "", part)
+        for part in raw.split(",")
+    ]
+    parts = [part for part in parts if part]
+    if len(parts) < 2:
+        return None
+
+    next_collected = dict(collected)
+    start_index = field_names.index(current_field)
+
+    for field_name, raw_value in zip(field_names[start_index:], parts, strict=False):
+        if field_name in next_collected:
+            continue
+        field_spec = _get_field_spec(fields, field_name)
+        try:
+            next_collected[field_name] = _coerce_value(
+                field_name,
+                str(field_spec.get("type", "str")),
+                raw_value,
+                allowed=field_spec.get("allowed"),
+                min_value=field_spec.get("min_value"),
+                max_value=field_spec.get("max_value"),
+                min_length=field_spec.get("min_length"),
+            )
+        except ValueError:
+            break
 
     return next_collected
 

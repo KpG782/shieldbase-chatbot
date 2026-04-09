@@ -5,6 +5,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -13,7 +14,7 @@ from env import load_project_env
 load_project_env()
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct")
+DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
 DEFAULT_MAX_RETRIES = int(os.getenv("OPENROUTER_MAX_RETRIES", "2"))
 DEFAULT_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost")
@@ -146,7 +147,24 @@ class OpenRouterClient:
         max_tokens: int = 512,
         top_p: float = 1.0,
         response_format: Mapping[str, Any] | None = None,
+        on_token: Callable[[str], None] | None = None,
     ) -> str:
+        """Return the assistant reply as a plain string.
+
+        When *on_token* is provided the request uses OpenRouter's streaming
+        API and each content delta is forwarded to the callback as it arrives.
+        The complete assembled response is still returned for callers that need
+        the full text (e.g. rag_answer stores it in state).
+        """
+        if on_token is not None:
+            return self._stream_chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                on_token=on_token,
+            )
+
         response = self.chat(
             [
                 {"role": "system", "content": system_prompt},
@@ -158,6 +176,68 @@ class OpenRouterClient:
             response_format=response_format,
         )
         return response.content
+
+    def _stream_chat_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        max_tokens: int,
+        on_token: Callable[[str], None],
+    ) -> str:
+        """Stream tokens via *on_token* callback; return the full assembled content."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        request = urllib.request.Request(
+            OPENROUTER_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=self._headers(),
+            method="POST",
+        )
+        full_content = ""
+        last_error: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                    for raw_line in response:
+                        line = raw_line.decode("utf-8").rstrip("\r\n")
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = (
+                                chunk.get("choices", [{}])[0]
+                                .get("delta", {})
+                                .get("content") or ""
+                            )
+                            if delta:
+                                on_token(delta)
+                                full_content += delta
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            continue
+                return full_content
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+                last_error = exc
+                if attempt >= self.max_retries:
+                    break
+                time.sleep(min(0.5 * (2**attempt), 4.0))
+
+        raise OpenRouterError(
+            f"Streaming request failed after {self.max_retries + 1} attempts: {last_error}"
+        ) from last_error
 
     def chat_json(
         self,
@@ -174,7 +254,12 @@ class OpenRouterClient:
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
-        parsed = json.loads(content)
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise OpenRouterError(
+                f"OpenRouter returned non-JSON content: {content[:120]!r}"
+            ) from exc
         if not isinstance(parsed, dict):
             raise OpenRouterError("OpenRouter JSON response was not an object.")
         return parsed

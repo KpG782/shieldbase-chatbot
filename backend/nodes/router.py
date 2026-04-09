@@ -42,10 +42,17 @@ def classify_intent(state: dict[str, Any], message: str, client: OpenRouterClien
     if forced is not None:
         return forced
 
+    # In the transactional quote flow, protect field answers and confirm-step replies from
+    # live LLM misclassification. This is the path hit by inputs like "2019" or "Toyota, Camry..."
+    # that must stay inside collect_details instead of drifting into RAG.
+    rules_result = _classify_with_rules(state, message)
+    if state.get("mode") == "transactional" and rules_result in {"response", "quote"}:
+        return rules_result
+
     llm_result = _classify_with_llm(state, message, client)
     if llm_result in {"question", "quote", "response"}:
         return llm_result
-    return _classify_with_rules(state, message)
+    return rules_result
 
 
 def _classify_deterministic(state: dict[str, Any], message: str) -> str | None:
@@ -59,6 +66,12 @@ def _classify_deterministic(state: dict[str, Any], message: str) -> str | None:
     # Restart is always a response when transactional, or a fresh quote trigger otherwise.
     if any(token in lowered for token in RESTART_HINTS):
         return "response" if mode == "transactional" else "quote"
+
+    # Fresh explicit quote requests should never be downgraded into generic RAG.
+    # This covers starts like "I want a quote for auto insurance" and
+    # "Can I get a home insurance quote?" even when the LLM misclassifies them.
+    if "quote" in lowered:
+        return "quote"
 
     # Waiting for the user to pick an insurance type: if they name a product, it is a response.
     # We bypass the LLM here because "home" / "auto" / "life" alone is reliably misclassified

@@ -1,54 +1,93 @@
 # ShieldBase Insurance Assistant
 
-ShieldBase is a hybrid insurance chatbot built for a technical take-home assessment. It combines:
+ShieldBase is a hybrid insurance chatbot built around two coordinated behaviors in one session:
 
-- conversational RAG for insurance questions
-- a deterministic quote workflow for `auto`, `home`, and `life`
-- backend-controlled state so users can interrupt a quote, ask a question, and resume cleanly
+- conversational RAG for insurance and coverage questions
+- deterministic quote collection for `auto`, `home`, and `life`
 
-## What It Does
+The backend is the source of truth for both chat state and quote state. Users can start a quote, interrupt it with a product question, and continue without losing progress.
 
-The app supports two modes in one conversation:
+## Current Capabilities
 
-- `Conversational mode`
-  Answers grounded insurance questions from the knowledge base.
-- `Transactional mode`
-  Collects quote details step by step, validates inputs, calculates a deterministic quote, and supports confirm / adjust / restart.
+- Answer insurance questions from the knowledge base
+- Start quotes for `auto`, `home`, and `life`
+- Collect quote details step by step with field-level validation
+- Preserve quote progress when the user asks a mid-flow product question
+- Resume the exact pending quote field after the interruption
+- Support `accept`, `adjust`, and `restart` after quote generation
+- Support switching from one product quote to another in the same session
+- Stream responses over SSE
+- Show quote summaries in the UI
+- Export quote details as:
+  - `Copy JSON`
+  - `Download JSON`
+  - `Download CSV` for Excel
 
-The core requirement is graceful switching between those two modes without losing state.
+## Chat Modes
 
-## Current Stack
+### `Conversational mode`
+
+Used for policy and coverage questions. The backend retrieves knowledge-base chunks, generates an answer, and streams it back to the UI.
+
+### `Transactional mode`
+
+Used for quote flows. The backend identifies the product, collects required fields, validates them, calculates a deterministic premium, and moves the user into confirmation.
+
+The system is explicitly designed to move between these two modes without dropping session state.
+
+## Quote Flow
+
+For quotes, the backend graph follows this shape:
+
+```text
+identify product -> collect details -> validate -> confirm
+```
+
+Important behavior:
+
+- explicit quote-start messages like `I want a quote for auto insurance` are routed into the quote flow
+- bare field replies like `2019` stay in the transactional branch instead of drifting into RAG
+- compact auto inputs like `Toyota, Camry, 35, 0, standard` can fill multiple fields in sequence
+- if the user asks a product question during collection, the assistant answers it and appends the exact resume prompt for the pending field
+- `adjust` clears the current quote result and reopens collection from the first required field
+
+## Stack
 
 | Component | Technology |
 |-----------|-----------|
 | Backend orchestration | Python + LangGraph `StateGraph` |
-| API layer | FastAPI + SSE streaming |
+| API layer | FastAPI + Server-Sent Events |
 | LLM | OpenRouter |
 | Retrieval | ChromaDB + sentence-transformers |
 | Frontend | Next.js App Router + React + Tailwind CSS |
 | Quote logic | Deterministic Python calculator |
+| Session persistence | In-memory with Redis support |
 
-## High-Level Flow
+## High-Level Request Path
 
 ```text
-User -> Next.js UI -> /api/chat proxy -> FastAPI /chat
-                                  |
-                                  v
-                         run_graph(state, message)
-                                  |
-                 +----------------+----------------+
-                 |                                 |
-                 v                                 v
-              RAG path                    quote workflow path
-      retrieve -> answer -> resume   identify -> collect -> validate
-                                                -> confirm
+Browser -> Next.js UI -> /api/chat proxy -> FastAPI /chat
+                                           |
+                                           v
+                                  LangGraph state machine
+                                           |
+                     +---------------------+----------------------+
+                     |                                            |
+                     v                                            v
+                  RAG path                                  quote workflow
+         retrieve -> answer -> stream               identify -> collect -> validate -> confirm
 ```
 
-For the fuller engineering diagrams, see:
+## Frontend UX
 
-- [ASCII architecture](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/architecture/ASCII_ARCHITECTURE.md)
-- [Architecture decisions](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/architecture/ARCHITECTURE_DECISIONS.md)
-- [Plain-English overview](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/layman/OVERVIEW_IN_PLAIN_ENGLISH.md)
+The UI includes:
+
+- authenticated access flow before entering the workspace
+- chat session state indicators for mode and step
+- local conversation history
+- quote summary cards
+- a confirmation page gated by backend quote state
+- compact quote export actions in the quote card
 
 ## Project Structure
 
@@ -64,20 +103,11 @@ shieldbase-chatbot/
 │   └── requirements.txt
 ├── frontend/
 │   ├── app/
-│   ├── public/
 │   ├── src/
 │   └── package.json
 ├── docs/
-│   ├── architecture/
-│   ├── audits/
-│   ├── design/
-│   ├── guides/
-│   ├── layman/
-│   ├── plans/
-│   ├── prompts/
-│   ├── reports/
-│   └── specs/
 ├── tests/
+├── QUOTE_FLOW_TEST_CHECKLIST.md
 └── README.md
 ```
 
@@ -100,34 +130,39 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-More detailed instructions:
+## Validation
 
-- [Local run guide](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/guides/LOCAL_RUN_INSTRUCTIONS.md)
-- [Purpose and flow](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/guides/PURPOSE_AND_FLOW.md)
-- [Knowledge base setup](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/guides/KNOWLEDGE_BASE_SETUP.md)
+Backend integration coverage includes:
 
-## Main Backend Invariant
+- health and reset endpoints
+- auto, home, and life quote flows
+- interruption and resume behavior
+- invalid input re-prompts
+- product switching mid-flow
+- `adjust` and `restart`
+- protection against LLM misclassification of quote-start and quote-field replies
+- compact multi-field auto input handling
 
-For transactional inputs, the backend now follows this order:
+Run the backend test suite with:
 
-1. read `current_field`
-2. validate the user input for that field
-3. if invalid, re-prompt the same field
-4. if valid, store it and move to the next field
+```powershell
+cd C:\Users\kpg78\Downloads\TENEXT\shieldbase-chatbot
+.\backend\.venv\Scripts\python.exe -m pytest tests\test_backend_integration.py -q
+```
 
-That prevents late-validation bugs and keeps `collected_data` clean.
-
-## Reviewer Notes
-
-The important design choices are:
+## Key Invariants
 
 - backend state is the source of truth
-- frontend renders state, it does not invent it
 - quote calculation is deterministic, not LLM-generated
-- RAG and transactional logic are separate but share one session
+- invalid field input must not advance the quote step
+- mid-quote product questions must not clear `collected_data`
+- quote-start intents must not be downgraded into generic RAG
+- the frontend renders backend state; it should not invent quote state on its own
 
-The repo also includes submission-focused docs:
+## Useful Docs
 
-- [Final submission audit](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/reports/FINAL_SUBMISSION_AUDIT.md)
-- [Hardening report](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/reports/HARDENING_REPORT.md)
-- [Docs index](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/README.md)
+- [Quote flow test checklist](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/QUOTE_FLOW_TEST_CHECKLIST.md)
+- [ASCII architecture](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/architecture/ASCII_ARCHITECTURE.md)
+- [Architecture decisions](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/architecture/ARCHITECTURE_DECISIONS.md)
+- [Plain-English overview](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/layman/OVERVIEW_IN_PLAIN_ENGLISH.md)
+- [Local run guide](/C:/Users/kpg78/Downloads/TENEXT/shieldbase-chatbot/docs/guides/LOCAL_RUN_INSTRUCTIONS.md)

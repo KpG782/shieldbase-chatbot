@@ -5,7 +5,12 @@ import { ChatWindow } from "./components/ChatWindow";
 import { QuoteCard } from "./components/QuoteCard";
 import { ShieldBaseLogo } from "./components/ShieldBaseLogo";
 import { useChat } from "./hooks/useChat";
-import { AUTH_STORAGE_KEY, getConfiguredCredentials } from "./lib/demoAuth";
+import {
+  checkAuthStatus,
+  getDemoUsernameHint,
+  serverLogin,
+  serverLogout,
+} from "./lib/demoAuth";
 
 function formatLabel(value: string | null | undefined, fallback: string) {
   if (!value) {
@@ -78,16 +83,30 @@ export default function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const credentials = useMemo(() => getConfiguredCredentials(), []);
 
+  // Optional username hint from NEXT_PUBLIC_AUTH_DEMO_USER (safe to expose).
+  // The password is never bundled into client code — it is validated server-side.
+  const demoUsernameHint = useMemo(() => getDemoUsernameHint(), []);
+
+  // Check auth status via the server-side /api/auth/check endpoint on mount.
+  // This reads the httpOnly cookie; the client never sees the cookie value.
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    setIsAuthenticated(window.localStorage.getItem(AUTH_STORAGE_KEY) === "true");
-    setAuthReady(true);
+    checkAuthStatus()
+      .then((authenticated) => {
+        setIsAuthenticated(authenticated);
+      })
+      .catch(() => {
+        setIsAuthenticated(false);
+      })
+      .finally(() => {
+        setAuthReady(true);
+      });
   }, []);
 
   const submitDraft = async () => {
@@ -105,37 +124,32 @@ export default function App() {
     setDraft("I need a quote for auto insurance.");
   };
 
-  const handleAutofillDemo = () => {
-    setUsername(credentials.username);
-    setPassword(credentials.password);
-    setAuthError(null);
+  const handleAutofillUsername = () => {
+    if (demoUsernameHint) {
+      setUsername(demoUsernameHint);
+      setAuthError(null);
+    }
   };
 
   const handleLogin = async () => {
-    if (
-      username.trim() === credentials.username &&
-      password === credentials.password
-    ) {
-      setIsAuthenticating(true);
-      setAuthError(null);
-      await new Promise((resolve) => window.setTimeout(resolve, 850));
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(AUTH_STORAGE_KEY, "true");
-      }
+    if (isAuthenticating) return;
+    setIsAuthenticating(true);
+    setAuthError(null);
+
+    const { ok, error } = await serverLogin(username.trim(), password);
+
+    if (ok) {
       setIsAuthenticated(true);
-      setIsAuthenticating(false);
       setPassword("");
-      return;
+    } else {
+      setAuthError(error ?? "Invalid username or password.");
     }
 
     setIsAuthenticating(false);
-    setAuthError("Invalid username or password.");
   };
 
-  const handleLogout = () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
+  const handleLogout = async () => {
+    await serverLogout();
     setIsAuthenticated(false);
     setIsAuthenticating(false);
     setUsername("");
@@ -173,26 +187,42 @@ export default function App() {
                 className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-[#bca46b] focus:ring-4 focus:ring-[#efe4c8]"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }}
                 placeholder="Enter username"
               />
             </label>
             <label className="grid gap-2">
               <span className="text-sm font-medium text-slate-700">Password</span>
-              <input
-                type="password"
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-[#bca46b] focus:ring-4 focus:ring-[#efe4c8]"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter password"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-12 text-slate-900 outline-none transition focus:border-[#bca46b] focus:ring-4 focus:ring-[#efe4c8]"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }}
+                  placeholder="Enter password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-400 transition hover:text-slate-700"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    {showPassword ? "visibility_off" : "visibility"}
+                  </span>
+                </button>
+              </div>
             </label>
-            <button
-              type="button"
-              className="w-fit text-sm font-medium text-blue-600 transition hover:text-blue-700 hover:underline"
-              onClick={handleAutofillDemo}
-            >
-              Use saved access
-            </button>
+            {demoUsernameHint ? (
+              <button
+                type="button"
+                className="w-fit text-sm font-medium text-blue-600 transition hover:text-blue-700 hover:underline"
+                onClick={handleAutofillUsername}
+              >
+                Autofill demo username
+              </button>
+            ) : null}
             {authError ? (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
                 {authError}
@@ -201,7 +231,7 @@ export default function App() {
             <button
               type="button"
               className="ui-hover-lift rounded-full bg-[#1f1f1f] px-4 py-3 text-sm font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:bg-slate-300"
-              onClick={handleLogin}
+              onClick={() => void handleLogin()}
               disabled={isAuthenticating}
             >
               {isAuthenticating ? "Signing in..." : "Login"}
@@ -297,7 +327,7 @@ export default function App() {
                   <button
                     type="button"
                     className="ui-hover-lift rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                    onClick={handleLogout}
+                    onClick={() => void handleLogout()}
                   >
                     Logout
                   </button>
@@ -394,7 +424,7 @@ export default function App() {
                     icon="logout"
                     label="Logout"
                     collapsed
-                    onClick={handleLogout}
+                    onClick={() => void handleLogout()}
                   />
                 </div>
               </div>
@@ -443,7 +473,7 @@ export default function App() {
                   <button
                     type="button"
                     className="ui-hover-lift rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700"
-                    onClick={handleLogout}
+                    onClick={() => void handleLogout()}
                   >
                     Logout
                   </button>

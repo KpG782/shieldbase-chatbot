@@ -6,6 +6,7 @@ from typing import Any, Mapping, MutableMapping, Sequence
 
 from services.llm import OpenRouterClient, OpenRouterError
 from services.vectorstore import RetrievedChunk, search_knowledge_base
+from streaming_context import get_on_token
 
 logger = logging.getLogger("shieldbase.rag")
 
@@ -100,14 +101,20 @@ def rag_answer(
             error=retrieval_error,
         )
 
+    # Use the streaming callback from the request thread if available.
+    # get_on_token() returns None when called outside a streaming context
+    # (e.g. in unit tests), which causes chat_text to use the non-streaming path.
+    on_token = get_on_token() if client is None else None
+
     prompt = _build_prompt(query, retrieved)
-    logger.debug("rag_answer: calling LLM model=%s", rag_client.model)
+    logger.debug("rag_answer: calling LLM model=%s streaming=%s", rag_client.model, on_token is not None)
     try:
         content = rag_client.chat_text(
             system_prompt=RAG_SYSTEM_PROMPT,
             user_prompt=prompt,
             temperature=0.2,
             max_tokens=450,
+            on_token=on_token,
         )
         logger.debug("rag_answer: LLM responded OK, len=%d", len(content))
     except (OpenRouterError, Exception) as exc:
